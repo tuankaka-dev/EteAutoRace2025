@@ -1,123 +1,175 @@
-  // === TEST HAM getError() CHO 5 TCRT5000 ===
-  // Nền đen – line trắng  →  line trắng = 0, nền đen = 1
-  // A1..A5 nối lần lượt với 5 cảm biến từ trái sang phải
+#define ENA 5
+#define ENB 6
 
-  void setup() {
-    Serial.begin(9600);
-    delay(1000);
-    Serial.println("=== BAT DAU TEST HAM getError() ===");
-  }
-
-
-  // =================== getError() ===================
-  // Dùng biến toàn cục để in ra ngoài loop
-  int l[6], b[6];
-  const int BASE = 80;      // speed (0..255)
+#define IN1 8
+#define IN2 9
+#define IN3 10
+#define IN4 11
+// Tốc độ
+const int BASE = 100;  // speed (0..255)
 const int PWM_MAX = 255;
-  const int Kp = 25, Ki = 0, Kd = 8 ;
-int P, I = 0, D, previous_error = 0;
+
+//  PID
+const int Kp = 8, Ki = 0, Kd = 5;
+int P, I = 0, D;
+int previous_error = 0;
+int last_seen_error = 0;
 int error, PIDValue;
-  int getError()
-  {
 
-      l[1] = analogRead(A1);
-      l[2] = analogRead(A2);
-      l[3] = analogRead(A3);
-      l[4] = analogRead(A4);
-      l[5] = analogRead(A5);
-      // 1 là đen 0 là trắng (giá trị sensor đen:8-15 ; trắng 800 - 820)
-      if (l[1] < 500) b[1] = 1; else b[1] = 0;
-      if (l[2] < 500) b[2] = 1; else b[2] = 0;
-      if (l[3] < 500) b[3] = 1; else b[3] = 0;
-      if (l[4] < 500) b[4] = 1; else b[4] = 0;
-      if (l[5] < 500) b[5] = 1; else b[5] = 0;
-
-
-
-    if (b[3] == 0 && b[4] == 0)
-    return 0;
-
-    // Nhận 3 cảm biến (nhiễu): coi như lệch nhẹ
-    else if (b[2] == 0 && b[3] == 0 && b[4] == 0)
-        return 0;
-    else if (b[3] == 0 && b[4] == 0 && b[5] == 0)
-        return 1;
-    else if (b[1] == 0 && b[2] == 0 && b[3] == 0)
-        return -1;
-
-    // Nhận 2 cảm biến liền kề
-    else if (b[4] == 0 && b[5] == 0)
-        return 2;
-    else if (b[1] == 0 && b[2] == 0)
-        return -2;
-    else if (b[3] == 0 && b[5] == 0)
-        return 1;
-    else if (b[2] == 0 && b[4] == 0)
-        return -1;
-
-    // Nhận 1 cảm biến
-    else if (b[3] == 0) // giữa
-        return 0;
-    else if (b[4] == 0)
-        return 1;
-    else if (b[2] == 0)
-        return -1;
-    else if (b[5] == 0)
-        return 3;
-    else if (b[1] == 0)
-        return -3;
+// pwm: -255..255 (âm = lùi)
+void remoteLeft(int pwm) {
+  pwm = constrain(pwm, -PWM_MAX, PWM_MAX);
+  if (pwm >= 0) {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
+    analogWrite(ENA, pwm);
+  } else {
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+    analogWrite(ENA, -pwm);
   }
-int computePID(int error)
-{
-    P = error;                  // Proportional
-    I += error;                 // Integral
-    D = error - previous_error; // Differential
-
-    int PID_value = (Kp * P) + (Ki * I) + (Kd * D);
-
-    previous_error = error;
-    return PID_value;
 }
-  
-  void loop() {
-    int error = getError();   // gọi hàm
-  PIDValue = computePID(error);
 
+void remoteRight(int pwm) {
+  pwm = constrain(pwm, -PWM_MAX, PWM_MAX);
+  if (pwm >= 0) {
+    digitalWrite(IN3, LOW);
+    digitalWrite(IN4, HIGH);
+    analogWrite(ENB, pwm);
+  } else {
+    digitalWrite(IN3, HIGH);
+    digitalWrite(IN4, LOW);
+    analogWrite(ENB, -pwm);
+  }
+}
+
+
+
+
+void setup() {
+  pinMode(ENA, OUTPUT);
+  pinMode(ENB, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  Serial.begin(9600);
+}
+
+void loop() {
+
+
+  error = getError();
+
+  PIDValue = computePID(error);
+  PIDValue = constrain(PIDValue, -70, 70);
   // Trộn BASE ± PID -> PWM cho 2 bánh
   //    Quy ước: error dương (lệch phải) => tăng trái, giảm phải
   int pwmL = BASE + PIDValue;
   int pwmR = BASE - PIDValue;
 
-
   pwmL = constrain(pwmL, 0, PWM_MAX);
   pwmR = constrain(pwmR, 0, PWM_MAX);
 
-    Serial.print("Error = ");
-    Serial.print(error);
-   
-    // // In ra mảng b[1..5] để xem cảm biến nhận gì
-     //Serial.print(" | Binary: ");
-    // for (int i = 1; i <= 5; i++) {
-    //   Serial.print(b[i]);
-    //   Serial.print(" ");
-    // }
+  remoteLeft(pwmL);
+  remoteRight(pwmR);
 
-    // Serial.print(" | Analog: ");
-    // for (int i = 1; i <= 5; i++) {
-    //   Serial.print(l[i]);
-    //   Serial.print("\t");
-    // }
-    // Serial.println();
-        // === DEBUG: in giá trị ra Serial Monitor ===
-
-
-Serial.print(" P=");  Serial.print(P);
-Serial.print(" I=");  Serial.print(I);
-Serial.print(" D=");  Serial.print(D);
-Serial.print(" | PID="); Serial.print(PIDValue);
-Serial.print(" | pwmL="); Serial.print(pwmL);
-Serial.print(" pwmR=");  Serial.print(pwmR);
-Serial.println();
-
-    delay(300); // đợi 200ms cho dễ đọc
+    // ==== GỌI TEST SENSOR & IN DEBUG MỖI 100ms ====
+  static uint32_t lastPrint = 0;
+  if (millis() - lastPrint >= 100) {
+    readIRSensors();                         // cập nhật irRaw[] và irBits
+    printLineDebug(error, PIDValue, pwmL, pwmR);
+    lastPrint = millis();
   }
+}
+// ================== DEBUG SENSOR BLOCK (ADD) ==================
+const int IR_PINS[5] = {A1, A2, A3, A4, A5};   // trùng thứ tự trong getError()
+const int IR_W[5]   = {-2, -1, 0, 1, 2};       // tham khảo (nếu cần)
+const int THR = 500;                           // nhớ giữ đồng bộ với getError()
+
+int irRaw[5];           // giá trị analog từng kênh
+uint8_t irBits = 0;     // bitmask trạng thái 5 kênh (A1..A5 -> bit4..bit0)
+
+// Đọc toàn bộ 5 cảm biến, lấp đầy irRaw[] và irBits
+void readIRSensors() {
+  irBits = 0;
+  for (int i = 0; i < 5; i++) {
+    irRaw[i] = analogRead(IR_PINS[i]);
+    if (irRaw[i] < THR) {  /// line đen < line trắng >
+      // A1 là trái nhất -> map vào bit cao nhất (bit4)
+      irBits |= (1 << (4 - i));
+    }
+  }
+}
+
+// In một dòng debug: RAW, DIG, err, P/I/D, PID, PWM L/R
+void printLineDebug(int err, int pid, int pwmL, int pwmR) {
+  Serial.print(F("RAW:"));
+  for (int i = 0; i < 5; i++) {
+    Serial.print(' ');
+    Serial.print(irRaw[i]);
+  }
+
+  Serial.print(F(" | DIG: "));
+  for (int i = 0; i < 5; i++) {
+    // In theo thứ tự A1..A5
+    Serial.print( ((irBits >> (4 - i)) & 1) ? '1' : '0' );
+  }
+
+  Serial.print(F(" | err="));   Serial.print(err);
+  Serial.print(F(" | P/I/D=")); Serial.print(P); Serial.print('/'); Serial.print(I); Serial.print('/'); Serial.print(D);
+  Serial.print(F(" | PID="));   Serial.print(pid);
+  Serial.print(F(" | PWM L/R=")); Serial.print(pwmL); Serial.print('/'); Serial.println(pwmR);
+}
+// ================== END DEBUG SENSOR BLOCK ==================
+
+int getError() {
+  // Thứ tự cảm biến: A1 trái nhất -> A5 phải nhất
+  const int S[5] = {A1, A2, A3, A4, A5};
+  const int W[5] = {-2, -1, 0, 1, 2};   // Trái âm, phải dương
+  const int THRESH = 400;               // line trắng > 500, nền đen < 500
+
+  int count = 0;
+  long sum = 0;
+
+  for (int i = 0; i < 5; i++) {
+    int val = analogRead(S[i]);
+    bool onLine = (val < THRESH); // trắng >
+    if (onLine) {
+      sum += W[i];
+      count++;
+    }
+  }
+
+  // Mất line -> xoay nhẹ theo hướng trước đó
+  if (count == 0) {
+    if (last_seen_error > 0) return 3;
+    if (last_seen_error < 0) return -3;
+    return 0;
+  }
+
+  int err = (int)(sum / count);
+  last_seen_error = err;
+  return err;
+}
+
+
+
+int computePID(int error) {
+  P = error;                   // Proportional
+
+  if (Ki != 0) {                 // tránh tích lũy khi Ki = 0
+    I += error; //
+    // I = constrain(I, -50, 50); // nếu sau này dùng Ki>0 thì mở dòng này
+  } else {
+    I = 0;
+  }               
+
+  D = error - previous_error;  // Differential
+
+  int PID_value = (Kp * P) + (Ki * I) + (Kd * D);
+
+  previous_error = error;
+  return PID_value;
+}
