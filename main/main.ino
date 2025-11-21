@@ -44,6 +44,10 @@ bool avoid_done = false;
 unsigned long lastUltraCheck = 0;
 unsigned long block_since = 0;
 bool obstacle_confirmed = false;
+// CP 5
+bool flag = false;
+// CP 6
+
 
 long readUltrasonicCM() {
   digitalWrite(TRIG, LOW);
@@ -59,7 +63,8 @@ long readUltrasonicCM() {
 // ================== STATE MACHINE ==================
 enum Mode { PRESTART,
             NORMAL,
-            AVOID };
+            AVOID,
+            STOP };
 Mode mode = PRESTART;
 
 // ================== MOTOR ==================
@@ -121,7 +126,7 @@ void setup() {
 
   digitalWrite(STBY, HIGH);  // bật mạch driver
 
-  pinMode(SW, INPUT_PULLUP);
+  pinMode(SW, INPUT);
   pinMode(TRIG, OUTPUT);
   pinMode(ECHO, INPUT);
 
@@ -137,14 +142,17 @@ int getError() {
     b[i] = (l[i] > TN) ? 1 : 0;
     count += b[i];
   }
-  if(cross_count >= 5 && lost_count >= 3)
-  {
+  // if (cross_count >= 5 && lost_count >= 3) {
+  //   b[2] = 0;
+  //   b[3] = 0;
+  //   count -= 2;
+  // }
+
+  if ( ((b[1] || b[2]) && (b[3] == 0 || b[4] == 0)) && (lost_count >= 3 || cross_count >=5 )) {
+    b[1] = 0;
     b[2] = 0;
-    b[3] = 0;
-    count-=2;
   }
 
- 
   // nhận giao nhau: nhiều mắt sáng và đủ 3 vùng (trái/giữa/phải)
   if (count >= 5 && (b[3] || b[4]) && (b[1] || b[2]) && (b[5] || b[6])) {
     cross_count++;
@@ -171,7 +179,7 @@ int getError() {
         return 0;
       } else if (isNearCenter) {
         // sau 3 gap, giữ hướng cũ mạnh hơn 1 chút
-        return (previous_error_map > 0) ? +3 : -3;
+        return (previous_error_map > 0) ? +2 : -2;
       } else {
         // đang lệch xa sẵn thì cứ theo lỗi cũ
         return previous_error_map;
@@ -197,42 +205,29 @@ int getError() {
       }
     }
   }
+  // if (flag) {
+  //   // 001111 và 000111: cua PHẢI rất gắt
+  //   bool p001111 = (!b[1] && !b[2] && b[3] && b[4] && b[5] && b[6]);     // 001111
+  //   bool p000111 = (!b[1] && !b[2] && !b[3] && b[4] && b[5] && b[6]);    // 000111
 
-  //   if (b[1] && b[2] && b[3] && !b[4] && !b[5] && !b[6]) { // 111000
-  //   previous_error_map = -4;    // ép quẹo PHẢI mạnh
-  //   return -4;
-  // }
 
-  // 011000: S2,S3 dính nhau (gần giống hình nhiễu vuông) -> cũng ép quẹo phải
-  // if (!b[1] && b[2] && b[3] && !b[4] && !b[5] && !b[6]) { // 011000
-  //   previous_error_map = -4;
-  //   return -4;
-  // }
+  //   // 111100 và 111000: cua TRÁI rất gắt
+  //   bool p111100 = (b[1] && b[2] && b[3] && b[4] && !b[5] && !b[6]);   // 111100
+  //   bool p111000 = (b[1] && b[2] && b[3] && !b[4] && !b[5] && !b[6]);  // 111000
 
-  // // 101000: S1,S3 sáng lệch (cục nhiễu + mép line) -> cũng xem là nhiễu
-  // if (b[1] && !b[2] && b[3] && !b[4] && !b[5] && !b[6]) { // 101000
-  //   previous_error_map = -4;
-  //   return -4;
-  // }
+  //   if (p001111 || p000111) {
+  //     previous_error_map = -20;  // ép cua PHẢI mạnh
+  //     return -20;
+  //   }
 
-  // // 110000: chỉ 1-2 sáng (ngoài mép, không có line giữa) -> nhiễu ngoài
-  // if (b[1] && b[2] && !b[3] && !b[4] && !b[5] && !b[6]) { // 110000
-  //   previous_error_map = -4;
-  //   return -4;
-  // }
 
-  // // 100000: chỉ S1 sáng -> nhiễu mép ngoài
-  // if (b[1] && !b[2] && !b[3] && !b[4] && !b[5] && !b[6]) { // 100000
-  //   previous_error_map = -4;
-  //   return -4;
-  // }
 
-  // // 010000: chỉ S2 sáng, cũng ở mép trái -> đè cho nó quẹo phải luôn
-  // if (!b[1] && b[2] && !b[3] && !b[4] && !b[5] && !b[6]) { // 010000
-  //   previous_error_map = -3;
-  //   return -3;
-  // }
 
+    // if (p111100 || p111000) {
+    //   previous_error_map = 20;    // ép cua TRÁI mạnh
+    //   return 20;
+    // }
+  //}
   // mapping lỗi (nhẹ)
   if (b[3] && b[4]) {  // 001100
     previous_error_map = 0;
@@ -323,6 +318,7 @@ void driveLR(int leftPWM, int rightPWM) {
   remoteLeft(leftPWM);
   remoteRight(rightPWM);
 }
+
 bool forwardSeekLine(unsigned long timeoutMs) {
   unsigned long t0 = millis();
   while (millis() - t0 < timeoutMs) {
@@ -340,8 +336,86 @@ bool forwardSeekLine(unsigned long timeoutMs) {
   }
   return false;
 }
+int detect90Pattern() {
+  int l[9], b[9];
+
+  for (int i = 1; i <= 6; i++) {
+    l[i] = analogRead(i - 1);
+    b[i] = (l[i] > TN) ? 1 : 0;
+  }
+  //if (millis() < block90_until) return 0;
+
+  bool p001111 = (!b[1] && !b[2] && b[3] && b[4] && b[5] && b[6]);   // cua phải
+  bool p000111 = (!b[1] && !b[2] && !b[3] && b[4] && b[5] && b[6]);  // cua phải
+  bool p000011 = (!b[1] && !b[2] && !b[3] && !b[4] && b[5] && b[6]);   // cua phải
+  bool p000001 = (!b[1] && !b[2] && !b[3] && !b[4] && !b[5] && b[6]);  // cua phải
+
+  bool p111100 = (b[1] && b[2] && b[3] && b[4] && !b[5] && !b[6]);   // cua trái
+  bool p111000 = (b[1] && b[2] && b[3] && !b[4] && !b[5] && !b[6]);  // cua trái
+
+  if (p001111 || p000111 || p000011 || p000001) return -1;  // phải
+  if (p111100 || p111000) return +1;  // trái
+  if ((!b[1] && !b[2] && !b[3] && !b[4] && !b[5] && !b[6])) return 10;
+  return 0;  // không phải cua 90
+}
+void turnRight90FromLine() {
+  // quay phải cho tới khi line về lại giữa (001100) hoặc hết timeout
+  unsigned long t0 = millis();
+  while (millis() - t0 < 200) {  // 800ms anh chỉnh theo thực tế
+    driveLR(BASE, -BASE);        // quay phải tại chỗ
+    int l[9], b[9];
+    int count = 0;
+    for (int i = 1; i <= 6; i++) {
+      l[i] = analogRead(i - 1);
+      b[i] = (l[i] > TN) ? 1 : 0;
+      count += b[i];
+    }
+
+    // line về giữa: 001100
+    if (!b[1] && (b[2] || b[3] || b[4] || b[5]) && !b[6]) {
+      break;
+    }
+  }
+
+  stopMotor();
+  delay(20);
+
+  // reset PID một chút cho đỡ giật
+  previous_error = 0;
+  previous_error_map = 0;
+}
+// void turnLeft90FromLine() {
+//   // xoay trái tại chỗ ~90°
+//   unsigned long t0 = millis();
+//   while (millis() - t0 < 300) {  // 800ms anh chỉnh theo thực tế
+//     driveLR(-BASE, BASE);        // quay phải tại chỗ
+//     int l[9], b[9];
+//     int count = 0;
+//     for (int i = 1; i <= 6; i++) {
+//       l[i] = analogRead(i - 1);
+//       b[i] = (l[i] > TN) ? 1 : 0;
+//       count += b[i];
+//     }
+
+//     // line về giữa: 001100
+//     if (!b[1] && !b[2] && b[3] && b[4] && !b[5] && !b[6]) {
+//       break;
+//     }
+//   }
+
+//   stopMotor();
+//   delay(20);
+
+//   // reset PID một chút cho đỡ giật
+//   previous_error = 0;
+//   previous_error_map = 0;
+// }
 // ================== LOOP ==================
 void loop() {
+  int state = digitalRead(SW);
+  if (state == LOW) {
+    if (digitalRead(SW) == LOW) flag = true;
+  }
   switch (mode) {
 
     // --------- CP1: PRESTART bằng ultrasonic ----------
@@ -367,10 +441,11 @@ void loop() {
     // --------- CP2: NORMAL ----------
     case NORMAL:
       {
+
         unsigned long now = millis();
 
         // ==== CHECK VẬT CẢN CHỈ SAU KHI ĐÃ QUA CỜ XUẤT PHÁT ====
-        if ((startflag_done || lost_count >= 3 ||cross_count >= 5) && now - lastUltraCheck >= ULTRA_PERIOD_MS) {
+        if ((startflag_done || lost_count >= 3 || cross_count >= 5) && now - lastUltraCheck >= ULTRA_PERIOD_MS) {
           lastUltraCheck = now;
           long d = readUltrasonicCM();
 
@@ -391,14 +466,38 @@ void loop() {
             mode = AVOID;
             break;  // ra khỏi case NORMAL, vòng lặp sau sẽ vào case AVOID
           }
+          if (obstacle_confirmed && avoid_done) mode = STOP;
+        }
+
+        int dir = 0;
+        if (flag) {
+          dir = detect90Pattern();
+        }
+        if (dir == -1) {
+          turnRight90FromLine();
+        }
+        if (dir == 10)
+        {
+          bool check = false;
+          check = forwardSeekLine(4);
+          if(!check)
+          {
+            driveLR(-BASE, BASE);
+            delay(3);        // quay phải tại chỗ
+
+          }
+          //if(!check) mode = STOP;
         }
 
         // ===== PID bình thường khi không có vật cản =====
+        int speed = BASE;
+        if (flag) speed = 98;
         error = getError();
+
         PIDValue = computePID(error);
 
-        int pwmL = BASE - PIDValue;
-        int pwmR = BASE + PIDValue;
+        int pwmL = speed - PIDValue;
+        int pwmR = speed + PIDValue;
         pwmL = constrain(pwmL, 0, PWM_MAX);
         pwmR = constrain(pwmR, 0, PWM_MAX);
         remoteLeft(pwmL);
@@ -420,24 +519,27 @@ void loop() {
 
         // 3) đi thẳng 1 đoạn để vượt khỏi vật cản
         driveLR(BASE, BASE);
-        delay(520);
+        delay(500);
 
         // 4) quẹo trái thêm lần nữa để hướng lại về đường cũ (tùy góc m muốn)
         driveLR(-BASE, BASE);
-        delay(520);
+        delay(485);
 
         // 5) chạy thẳng tìm lại line trong tối đa 2s
-        if(forwardSeekLine(1000))
-        {
+        if (forwardSeekLine(1000)) {
           stopMotor();
           delay(35);
 
-        // Sau khi bắt line (hoặc hết timeout), quay lại mode NORMAL
+          // Sau khi bắt line (hoặc hết timeout), quay lại mode NORMAL
           mode = NORMAL;
           avoid_done = true;
         }
 
         break;
+      }
+    case STOP:
+      {
+        stopMotor();
       }
   }
 }
